@@ -1,133 +1,45 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "awawausb documentation"
+description: "awawausb adds the WebUSB API to Firefox via native messaging. Install the extension and native stub to let web pages communicate with USB devices."
 ---
 
-## Setting up
+awawausb is a Firefox browser extension that brings WebUSB support to Firefox. Because Firefox does not natively implement the WebUSB API, this extension bridges the gap by pairing a lightweight browser extension with a Rust-compiled native stub binary that communicates with USB hardware using OS-level APIs.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the Firefox extension and the native stub on macOS, Linux, or Windows.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="System requirements" icon="server" href="/system-requirements">
+    Check OS versions, kernel requirements, and driver prerequisites before you start.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="What is WebUSB?" icon="usb" href="/guides/what-is-webusb">
+    Learn how WebUSB compares to WebHID, Web Serial, and other browser device APIs.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Developer guide" icon="code" href="/developer/building-from-source">
+    Build from source, configure a native manifest, and debug the extension internals.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+awawausb has two components that must both be installed:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+1. **The browser extension** — injects `navigator.usb` and the full WebUSB API surface into every web page. A persistent background script manages device state, user permissions, and message routing between pages.
 
-## Make your content agent ready
+2. **The native stub** — a small Rust binary that runs alongside the browser and communicates with physical USB devices using OS APIs. Firefox launches it automatically via [native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging) and exchanges JSON over stdin/stdout.
 
-Make your docs work for humans and AI agents alike.
+<Note>
+Both the extension **and** the native stub must be installed. The extension alone cannot access USB hardware.
+</Note>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+## Supported platforms
 
-## Need inspiration?
+| Platform | Architectures |
+|---|---|
+| macOS 10.15+ | x86_64, ARM64 (Universal binary) |
+| Linux (kernel 4.8+) | x86_64, aarch64 |
+| Windows 10+ | AMD64, ARM64 |
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Chrome compatibility
+
+awawausb targets full compatibility with Chrome's WebUSB implementation. The `navigator.usb` object, `USBDevice` class, and all transfer methods behave the same as in Chromium. One known difference: unlike Chrome, the API is only available on the **main page** and not inside [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers).

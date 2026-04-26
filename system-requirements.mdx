@@ -1,0 +1,50 @@
+---
+title: "System requirements for awawausb"
+description: "Operating system versions, kernel requirements, and driver prerequisites needed to run the awawausb WebUSB extension for Firefox on macOS, Linux, and Windows."
+---
+
+awawausb targets reasonably modern desktop platforms. The native stub avoids unusual system dependencies, but each operating system has its own baseline requirements. Check the relevant tab below before installing.
+
+<Info>
+  Android is not supported. Firefox on Android does not have native messaging capabilities, which the extension depends on to communicate with the native stub.
+</Info>
+
+<Tabs>
+  <Tab title="macOS">
+    **macOS 10.15 (Catalina) or later** is required, matching Firefox's own system requirements.
+
+    Older versions in the 10.15–11 range are not well tested. **macOS 12 (Monterey) is a more reasonable baseline** if you want a configuration that has been exercised during development.
+
+    No additional drivers or system configuration are needed on macOS. The native stub binary is a self-contained executable; the installer removes the quarantine attribute automatically so that Gatekeeper does not block it.
+  </Tab>
+  <Tab title="Linux">
+    **Linux kernel 4.8 or later** is required.
+
+    More specifically:
+
+    - A kernel containing commit `5cce438` and `USBDEVFS_CAP_REAP_AFTER_DISCONNECT` is strongly recommended.
+    - A kernel supporting `USBDEVFS_DISCONNECT_CLAIM` is required.
+
+    The following must also be true of your system:
+
+    - `/dev` and `/sys` must be mounted.
+    - A userspace daemon must be broadcasting `0xfeedcafe`-format messages on `NETLINK_KOBJECT_UEVENT` group `2`.
+
+    <Warning>
+      Most Linux systems use [udev](https://man7.org/linux/man-pages/man7/udev.7.html) (typically via systemd) to broadcast these kernel events. If your system uses a minimal init or a non-standard udev replacement, verify that it publishes hotplug events in the expected format on group `2`. Without this, the extension cannot detect USB devices being connected or disconnected.
+    </Warning>
+
+    By default, most Linux distributions do not grant unprivileged users access to USB devices. You will likely need to configure udev rules to allow your user account to open the device. See [Linux USB permissions](/guides/linux-usb-permissions) for step-by-step instructions.
+  </Tab>
+  <Tab title="Windows">
+    **Windows 10 or later** is required, due to both Firefox's system requirements and the Rust platform support targets used to build the native stub.
+
+    Windows 8 and 8.1 are not supported. Versions older than Windows 8 are definitely not expected to work due to limitations in WinUSB.
+
+    **WinUSB driver required per device:** The extension can only communicate with USB devices that are using the WinUSB driver. Devices designed for WebUSB will typically recommend WinUSB automatically. For other devices, you can use [Zadig](https://zadig.akeo.ie/) to switch the driver to WinUSB — but be aware that doing so gives one program at a time exclusive access to the device and removes OS-level sharing. See [Windows WinUSB setup](/guides/windows-winusb) for details.
+
+    <Note>
+      Building the native stub with the MSVC toolchain is not supported. Prebuilt Windows binaries use [mingw-w64](https://www.mingw-w64.org/) targeting the UCRT (`*-windows-gnullvm` Rust targets). See [Building from source](/developer/building-from-source) for more information.
+    </Note>
+  </Tab>
+</Tabs>

@@ -1,0 +1,60 @@
+---
+title: "awawausb architecture overview"
+description: "How awawausb routes WebUSB calls from web pages through the browser extension background script to the native stub and USB devices."
+---
+
+awawausb is built around three cooperating layers: web pages (with injected content scripts), a single persistent extension background script, and a single native stub binary. A USB request made by a web page travels from the page's JavaScript through two content scripts, across the browser's native messaging channel to the Rust native stub, and then down to the OS USB stack — with the response returning along the same path in reverse.
+
+## Layers and data flow
+
+Each web page the user visits gets two content scripts injected at `document_start`. The **main world** script runs in the same JavaScript environment as the page and implements the full WebUSB API surface (`navigator.usb`, `USBDevice`, etc.). The **isolated world** script runs in the extension's sandboxed context, where it can use the browser's `runtime.postMessage` API. The two scripts communicate via function calls across the world boundary.
+
+The isolated content script passes USB requests as `postMessage` calls to the background script. The background script is the single privileged coordinator: it holds all permission and device state, and it communicates with the native stub by exchanging JSON messages over `stdin`/`stdout` (the browser's [native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging) protocol). The native stub translates those JSON messages into OS-specific USB syscalls and sends completion or error messages back.
+
+<Note>
+The decision to route all requests through a single background service was driven by the need to monitor for new USB devices even when no page is actively using USB. WebUSB descriptors allow a device to suggest a landing page URL, which requires watching for hotplug events in the background at all times.
+</Note>
+
+## Key architectural facts
+
+- **One background script, one native stub.** Each browser instance hosts exactly one extension background script, which maintains exactly one connection to the native stub binary. The native stub is launched via native messaging when the extension starts.
+- **Many USB devices.** The single native stub can communicate with any number of USB devices simultaneously, using OS-specific APIs on macOS, Linux, and Windows.
+- **Background script is the security boundary.** The background script is responsible for ensuring that web pages can only access USB devices the user has explicitly granted permission for. The native stub has no knowledge of web pages or permissions.
+- **Native stub is page-agnostic.** The native stub translates JSON messages to OS syscalls. It implements a VID/PID blocklist, but all WebUSB-specific security is enforced by the background script, not the stub.
+- **Multiplexing is the background script's job.** Because one native stub serves multiple pages, the background script must track how many pages have opened or claimed each interface, duplicating reference-counting that the OS USB stack would ordinarily handle.
+
+## Where state lives
+
+| Layer | State held |
+|---|---|
+| Native stub | All USB devices on the system; OS device/interface handles |
+| Background script | All USB devices; user consent and permissions per page; open/claim reference counts per interface |
+| Isolated content script | Almost nothing — primarily passes messages between the main script and the background script |
+| Main content script | Only the devices the current page has been explicitly granted access to |
+
+<Note>
+Redundant state is intentionally held in multiple places because so many of the relevant APIs are built around message passing rather than shared memory. This creates a risk of state getting out of sync due to programming mistakes. There is currently no architectural mitigation for this other than careful coding.
+</Note>
+
+## Outstanding transactions router
+
+Every USB request is assigned a **transaction ID** formatted as `pageID-txnID` (for example, `1-5` or `0-26`). The background script maintains a `usb_txns` Map keyed by these strings.
+
+- **Page 0** is reserved for requests issued by the background script itself (for example, fetching WebUSB platform capability descriptors on device discovery). These entries store `[resolve, reject]` pairs for internal Promises.
+- **Pages 1, 2, …** correspond to open web pages. Their entries store callbacks that eventually call `postMessage` back to the originating page once the native stub responds.
+
+This design lets a single `usb_txns` Map route completions to the correct page or internal caller regardless of how many pages are active concurrently.
+
+## Further reading
+
+<CardGroup cols={3}>
+  <Card title="Native stub" icon="microchip" href="/architecture/native-stub">
+    Rust event loop design and OS-specific USB backends for macOS, Linux, and Windows.
+  </Card>
+  <Card title="Background script" icon="shield" href="/architecture/background-script">
+    Transaction routing, permission enforcement, device multiplexing, and auxiliary pages.
+  </Card>
+  <Card title="Content scripts" icon="code" href="/architecture/content-scripts">
+    How the isolated and main world scripts cooperate to expose the WebUSB API surface.
+  </Card>
+</CardGroup>

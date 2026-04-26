@@ -1,0 +1,150 @@
+---
+title: "Native stub design: Rust USB backend"
+description: "How the awawausb native stub is implemented in Rust, including the event loop design and OS-specific approaches on macOS, Linux, and Windows."
+---
+
+The native stub is a Rust binary launched by Firefox via native messaging. It reads JSON request messages from `stdin`, translates them into OS USB syscalls, and writes JSON response messages to `stdout`. It has no knowledge of web pages, users, or permissions — it is purely a message-to-syscall translator. The message protocol is defined in `native-stub/src/protocol.rs`, which declares typed `RequestMessage` and `ResponseMessage` enums serialized with `serde`.
+
+## Design philosophy
+
+<Note>
+The native stub deliberately avoids Rust async runtimes. All concurrency is handled through explicit, manually-controlled event loops, keeping the design close to a traditional Unix-style daemon. This was a deliberate choice after determining that OS USB completion events map very directly onto a message-passing interface, making async unnecessary on the Rust side — JavaScript on the other end handles async ergonomically.
+</Note>
+
+The guiding principles for the native stub are:
+
+- **Async throughout, but not Rust async.** The run loop is hand-written around OS multiplexing primitives (`kqueue`, `epoll`, `WaitForMultipleObjects`).
+- **Single-threaded where possible.** macOS and Linux are fully single-threaded. Windows requires threading because its hotplug and pipe APIs do not support the same kind of I/O multiplexing.
+- **No C FFI wrappers or existing Rust USB libraries.** Raw OS APIs are called directly via `unsafe` Rust.
+- **No messing with C toolchains during the build.** Pure Rust build using `cargo`.
+
+## Common features
+
+Global state is packed into the `USBStubEngine` struct. Because `USBDevice` structs inside it hold raw pointers back to global state (C-style), `USBStubEngine` must be **pinned** in memory for the lifetime of the process.
+
+Each detected USB device is assigned a **session ID** — a unique 64-bit counter value that identifies a particular instance of a device being plugged in. Unplugging and re-plugging the same device produces a new session ID. This design is directly inspired by IOKit, which has an equivalent built-in concept.
+
+In-flight USB transfers are stored in a per-OS struct that owns all data needed to process the transfer, including:
+
+- The transaction ID (so JavaScript can match responses to requests)
+- All memory buffers the OS may access during the transfer (data payload, isochronous packet metadata, platform-specific structs such as Linux URBs or Windows `OVERLAPPED`)
+
+Ownership of these buffers is conceptually transferred to the OS when a transfer is submitted and recovered when the OS signals completion. If something goes wrong during teardown, the code prefers to let memory leak rather than attempt to recover a potentially dangling pointer.
+
+<Note>
+In-flight transfer structs are designed to avoid back-references to device or engine state, to prevent complex race conditions during device teardown. This rule is followed differently on each platform; see the platform sections below for exceptions.
+</Note>
+
+## Platform implementations
+
+<Tabs>
+  <Tab title="macOS">
+    macOS uses `kqueue` as the run loop multiplexer. Both `stdin` (for browser requests) and IOKit Mach ports (for USB notifications and transfer completions) are registered with the kqueue. The key bridge between the Mach world and the IOKit world is `IODispatchCalloutFromMessage`.
+
+    **Device and interface handles**
+
+    macOS requires both a device handle and per-interface handles. Unlike other platforms, macOS allows opening an interface handle without claiming it, even for interfaces with a bound kernel driver. The native stub therefore eagerly opens a handle to every interface as soon as the device is detected. When the device configuration is changed, all interface handles are closed and reopened.
+
+    **Endpoint address mapping**
+
+    macOS does not use endpoint addresses directly. Instead it uses "pipeRef" indices, and these indices are not guaranteed to match the order that endpoints appear in the descriptor. The native stub maintains a map from endpoint addresses to pipeRef indices and must rebuild this map whenever interfaces are opened or configuration changes.
+
+    **Transfer teardown race condition**
+
+    macOS violates the general rule that in-flight transfers should not hold back-references to other state. Transfers on macOS hold an `Rc<RefCell<_>>` pointing to the struct owning the OS interface handle. This is not used to access data, but solely to prevent a race condition:
+
+    1. A transfer is pending (e.g., an IN endpoint with no data available).
+    2. The device is unplugged; the unplug event is detected first.
+    3. The code drops the `USBDevice`, which tries to close all interface handles.
+    4. Closing an interface handle deallocates the Mach port used to receive transfer completion notifications.
+    5. Pending transfer completions can never be delivered.
+
+    The workaround keeps the OS interface handle open until the OS returns failure notifications for all pending transfers, at which point the handle is released and memory is reclaimed.
+  </Tab>
+  <Tab title="Linux">
+    Linux uses `epoll` as the run loop multiplexer. Three sources of events are multiplexed together: `stdin` (browser requests), a udev netlink socket (device hotplug), and USB device file descriptors (transfer completions).
+
+    **Single handle per device**
+
+    Linux is the closest match to WebUSB's programming model. Only one file descriptor is opened per device. All interfaces and all transfers go through this single fd, without requiring separate per-interface handles.
+
+    **epoll context design**
+
+    The `epoll` API returns only a single pointer-sized value per event, not the originating fd. The native stub stores the session ID in this context value, then looks up the corresponding fd through `USBStubEngine`'s data structures. This avoids the need to reason about struct lifetime when a pointer-to-struct is stored in epoll context. A consequence is that leak-free device teardown requires kernel support for the commit referenced as `5cce438` in the project README.
+
+    **Cached descriptors via sysfs**
+
+    USB descriptors are read from sysfs to minimize unnecessary bus traffic. To reduce race conditions, the native stub opens an fd to the sysfs device directory rather than re-opening paths by name each time.
+
+    **Transfer timeouts via timerfd**
+
+    WebUSB does not define transfer timeouts, but internal-use transfers (such as fetching WebUSB descriptors) require them. Unlike macOS and Windows, Linux's asynchronous USB interface does not provide built-in timeout support. Timeouts for these internal transfers are implemented using [`timerfd`](https://man7.org/linux/man-pages/man2/timerfd_create.2.html), adding the timer fd to the epoll set.
+
+    Although Linux's official USB documentation only mentions getting completion notifications via signals, the native stub uses `poll`/`epoll` on the USB device fd directly, which has always been supported by the kernel driver (see `drivers/usb/core/devio.c`). Completions are indicated with `EPOLLOUT`, even though `write` is never used.
+  </Tab>
+  <Tab title="Windows">
+    Windows is the most complex platform and requires threading because two key APIs cannot be multiplexed using a single mechanism.
+
+    **Threading model**
+
+    Three threads collaborate:
+
+    - **Main thread**: handles hotplug events and USB commands using `WaitForMultipleObjects`.
+    - **stdin reader thread**: performs blocking reads on `stdin` (anonymous pipes do not support async I/O on Windows), writes data to an `mpsc::channel`, and signals an event.
+    - **IOCP thread**: exclusively handles I/O completion port packets for USB transfers and sends response messages.
+
+    Hotplug detection uses `CM_Register_Notification` from the CfgMgr32 APIs. This invokes callbacks on the Windows default thread pool. The stub takes advantage of this by doing blocking descriptor queries in the callback, then sending the fully-resolved device data to the main thread via `mpsc::channel` and signaling a `SetEvent` handle.
+
+    WinUSB transfers use I/O completion ports (IOCP). The underlying `HANDLE` (not the `WINUSB_INTERFACE_HANDLE`) must be registered in the IOCP. All associated interfaces automatically share the same IOCP. Because IOCPs are not waitable objects, transfer completions cannot be handled on the main thread and require the dedicated IOCP thread.
+
+    <Note>
+    Windows is the one platform where in-flight transfers are required to be fully self-contained (no back-references to device or engine state), since the IOCP thread processes completions independently of the main thread.
+    </Note>
+
+    **Driver-per-interface model**
+
+    Windows does not support opening a handle to a device as a whole. Handles are opened to drivers (typically WinUSB), and one driver may cover one interface, multiple interfaces (if Interface Association Descriptors are used), or the entire device depending on how the composite USB parent driver (`usbccgp.sys`) has partitioned the device.
+
+    Windows also does not allow claiming a subset of interfaces covered by a driver instance; opening the WinUSB driver claims all interfaces it controls. The native stub uses reference counting to approximate WebUSB's per-interface claim semantics as closely as possible.
+
+    **Descriptor retrieval via hub traversal**
+
+    Cached USB descriptors cannot be read from a simple sysfs-equivalent. Instead, the native stub traverses the device tree upward to find the hub the device is connected to, then queries the hub directly. This works for both external hubs and root hubs.
+
+    **Enumeration quirks**
+
+    The Windows driver model is designed for vendors targeting specific device GUIDs, not for generic USB access. The native stub works around this by requesting all USB devices on startup and subscribing to hotplug notifications for all devices, then manually filtering for WinUSB devices and checking `DeviceInterfaceGUIDs`. Several steps in enumeration require parsing device property strings, including finding interface numbers for composite devices and parsing `DEVPKEY_Device_LocationInfo` to identify which hub port a device occupies.
+  </Tab>
+</Tabs>
+
+## Protocol types
+
+The JSON protocol is defined in `native-stub/src/protocol.rs`. Request messages are sent from the browser to the stub; response messages flow the other direction. Both are tagged enums serialized with `serde`.
+
+**Request messages** (`RequestMessage`):
+
+| Variant | Purpose |
+|---|---|
+| `ControlTransfer` | Issue a USB control transfer |
+| `DataTransfer` | Issue a bulk or interrupt transfer |
+| `IsocTransfer` | Issue an isochronous transfer |
+| `ClearHalt` | Clear an endpoint halt/stall condition |
+| `OpenDevice` | Open a device by session ID |
+| `CloseDevice` | Close a device |
+| `ResetDevice` | Issue a USB bus reset |
+| `SetConfiguration` | Select a device configuration |
+| `ClaimInterface` | Claim an interface for exclusive access |
+| `ReleaseInterface` | Release an interface |
+| `SetAltInterface` | Select an alternate setting on an interface |
+
+**Response messages** (`ResponseMessage`):
+
+| Variant | Purpose |
+|---|---|
+| `NewDevice` | Announces a newly detected USB device with full descriptor data |
+| `UnplugDevice` | Announces a device has been removed |
+| `RequestComplete` | Transfer completed successfully (with optional data payload) |
+| `RequestError` | Transfer failed with a typed error code |
+| `IsocRequestComplete` | Isochronous transfer completed with per-packet status |
+
+Every request and response carries a `txn_id` string that the background script uses to route completions back to the originating page.

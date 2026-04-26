@@ -1,0 +1,78 @@
+{
+  "projectType": "general",
+  "projectName": "awawausb",
+  "projectDescription": "A Firefox browser extension that adds WebUSB support via a Rust-based native messaging stub, enabling web pages to communicate with USB devices across macOS, Linux, and Windows.",
+  "theme": "luma",
+  "primaryColor": "#848486",
+  "lightColor": "#15151d",
+  "darkColor": "#bcbbbc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "system-requirements"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/what-is-webusb",
+              "guides/linux-usb-permissions",
+              "guides/windows-winusb",
+              "guides/troubleshooting"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/native-stub",
+              "architecture/background-script",
+              "architecture/content-scripts"
+            ]
+          },
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "developer/building-from-source",
+              "developer/native-manifest",
+              "developer/debugging",
+              "developer/protocol-reference"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "WebUSB API implementation for Firefox via native messaging",
+    "Cross-platform native stub (macOS, Linux, Windows) written in Rust",
+    "Supports control, bulk, interrupt, and isochronous USB transfers",
+    "Device hotplug detection and WebUSB descriptor-based landing page notifications",
+    "Per-page permission management and interface claim multiplexing",
+    "Chrome-compatible WebUSB API surface",
+    "Single-threaded event loop design on macOS and Linux (kqueue/epoll)",
+    "Prebuilt binaries with installer scripts for all major platforms"
+  ],
+  "publicApiSurface": [
+    "navigator.usb.requestDevice(filters) — request user permission to access a USB device",
+    "navigator.usb.getDevices() — list previously permitted USB devices",
+    "navigator.usb.addEventListener('connect' | 'disconnect', handler) — hotplug events",
+    "USBDevice.open() / USBDevice.close()",
+    "USBDevice.selectConfiguration(configurationValue)",
+    "USBDevice.claimInterface(interfaceNumber) / USBDevice.releaseInterface(interfaceNumber)",
+    "USBDevice.selectAlternateInterface(interfaceNumber, alternateSetting)",
+    "USBDevice.controlTransferIn/Out(setup, length)",
+    "USBDevice.transferIn(endpointNumber, length) / USBDevice.transferOut(endpointNumber, data)",
+    "USBDevice.isochronousTransferIn/Out(endpointNumber, packetLengths)",
+    "USBDevice.clearHalt(direction, endpointNumber)",
+    "USBDevice.reset()",
+    "USBConnectionEvent — fired on connect/disconnect"
+  ]
+}

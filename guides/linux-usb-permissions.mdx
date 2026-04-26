@@ -1,0 +1,107 @@
+---
+title: "Configure USB device permissions on Linux"
+description: "Set up udev rules to grant unprivileged access to USB devices on Linux so the awawausb extension can communicate with them from Firefox."
+---
+
+Most Linux installations deny unprivileged users access to USB devices by default. This behavior originates from the tradition of multi-user Unix systems, where restricting hardware access made sense for shared machines. These defaults persist even on personal computers used by a single person. If a device you expect to appear in awawausb's "List devices" output is missing, a permissions problem at the operating system level is the most likely cause.
+
+Permissions for USB devices are controlled by filesystem permissions on device nodes under `/dev/bus/usb`. On most modern Linux desktop installations, these permissions are managed by [udev](https://www.freedesktop.org/software/systemd/man/latest/udev.html). You can inspect current permissions with `ls -l /dev/bus/usb` and, for ACL-based access, with `getfacl`.
+
+<Note>
+The Steam Deck enables unprivileged USB access for all devices by default, so this configuration is not needed on Steam Deck.
+</Note>
+
+## Choose a permissions approach
+
+Three common approaches exist for granting access. The differences mainly matter for multi-user scenarios such as remote login or fast user switching. For a personal laptop used by one person at a time, any of them will work.
+
+<Tabs>
+  <Tab title="uaccess tag (recommended)">
+    This approach uses systemd's `uaccess` mechanism to dynamically grant access to the physically logged-in user. It is the current recommended best practice because it ties permissions to who is sitting in front of the computer rather than to a static group or world-readable mode.
+
+    Follow the steps in the [Configure uaccess](#configure-uaccess-recommended) section below.
+  </Tab>
+  <Tab title="Group-based (plugdev)">
+    This approach sets the device file to mode `0660` and assigns it to a group such as `plugdev`. Users added to that group can access the device.
+
+    Create a rule file at `/etc/udev/rules.d/50-my-usb-device.rules`:
+
+    ```text
+    ACTION!="remove", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1234", MODE="0660", GROUP="plugdev"
+    ```
+
+    Then add your user to the group:
+
+    ```bash
+    sudo usermod -aG plugdev $USER
+    ```
+
+    Log out and back in for the group membership to take effect.
+  </Tab>
+  <Tab title="World-readable (0666)">
+    This approach sets the device file to mode `0666`, granting read and write access to all users on the system. It is the simplest option but the least restrictive.
+
+    Create a rule file at `/etc/udev/rules.d/50-my-usb-device.rules`:
+
+    ```text
+    ACTION!="remove", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1234", MODE="0666"
+    ```
+
+    <Warning>
+      Mode `0666` allows any local user account to access the device. Prefer the `uaccess` or group-based approach on shared computers.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Configure uaccess (recommended)
+
+<Steps>
+  <Step title="Find your device's vendor ID">
+    Run `lsusb` to list connected USB devices. The output shows IDs in the form `Bus NNN Device NNN: ID vvvv:pppp`, where `vvvv` is the four-digit hexadecimal vendor ID and `pppp` is the product ID.
+
+    ```bash
+    lsusb
+    ```
+
+    Note the vendor ID for your device.
+  </Step>
+  <Step title="Create the udev rule file">
+    Create a new file at `/etc/udev/rules.d/50-my-usb-device.rules` (adjust the filename to match your device). Insert the following, replacing `1234` with your device's actual vendor ID:
+
+    ```text
+    ACTION!="remove", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1234", TAG+="uaccess"
+    ```
+
+    You can also match on both vendor and product ID for a more specific rule:
+
+    ```text
+    ACTION!="remove", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1234", ATTRS{idProduct}=="5678", TAG+="uaccess"
+    ```
+  </Step>
+  <Step title="Reload and reapply the rules">
+    Run the following commands as root to apply the new rules to already-connected devices:
+
+    <CodeGroup>
+
+    ```bash Reload rules
+    sudo udevadm control --reload-rules
+    ```
+
+    ```bash Reapply to existing devices
+    sudo udevadm trigger
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      Reloading rules manually may not be necessary on recent systems — udev often picks up changes automatically. However, running these commands is harmless and ensures the rules take effect immediately without a reboot.
+    </Note>
+  </Step>
+  <Step title="Verify access">
+    Open Firefox and click the awawausb extension icon. Click "List devices" and confirm your device now appears in the list.
+
+    <Tip>
+      If the device still does not appear, try unplugging it and plugging it back in. This causes udev to process the device as a new connection event and apply the updated rules.
+    </Tip>
+  </Step>
+</Steps>

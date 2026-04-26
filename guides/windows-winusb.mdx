@@ -1,0 +1,59 @@
+---
+title: "WinUSB driver setup for WebUSB on Windows"
+description: "Learn why Windows USB devices need the WinUSB driver for WebUSB access, and how to install it using the Zadig utility for devices that need manual setup."
+---
+
+On Windows, awawausb can only communicate with USB devices that are using the WinUSB driver. If a device you expect to see in awawausb's "List devices" output is missing on Windows, the device is almost certainly using a different driver. This page explains what WinUSB is, when you need to change anything, and how to do it using Zadig.
+
+## What WinUSB is
+
+WinUSB is a generic Windows driver that provides direct, low-level access to USB devices. Unlike class-specific drivers (printer drivers, HID drivers, webcam drivers), WinUSB does not implement any higher-level functionality — it simply transfers data between a program and the device. This is exactly what WebUSB needs: a stable, generic channel to communicate with the device without the operating system interpreting the traffic.
+
+The tradeoff is exclusivity. When a device uses WinUSB, the operating system can no longer use or share the device's specialized functionality. A printer using WinUSB cannot be shared across multiple applications or managed by the Windows print queue. A device that previously worked with its own vendor driver will stop working with that driver once WinUSB is assigned. Only one program at a time can hold exclusive access to the device through WinUSB.
+
+<Warning>
+Switching a device to WinUSB prevents the operating system and other software from using that device's built-in functionality. A printer becomes inaccessible to word processors. A device with a vendor app stops working with that app. Only switch to WinUSB if you understand this tradeoff and have a specific reason to do so.
+</Warning>
+
+## Devices designed for WebUSB
+
+Many devices intended for use with WebUSB are already configured to recommend the WinUSB driver to Windows. The device maker can embed this recommendation using WCID descriptors or WebUSB platform capability descriptors. When Windows detects such a device for the first time, it installs WinUSB automatically with no user action required.
+
+<Note>
+If your device was designed for WebUSB use, it may already work with awawausb on Windows without any driver changes. Check awawausb's "List devices" page first before making any driver modifications.
+</Note>
+
+This is the [recommended practice](https://developer.chrome.com/docs/capabilities/build-for-webusb) for hardware designed specifically for WebUSB.
+
+## Installing WinUSB with Zadig
+
+For devices that do not automatically use WinUSB — for example, a device with its own vendor driver, or an older device whose recommended driver is no longer compatible — you can manually assign the WinUSB driver using [Zadig](https://zadig.akeo.ie/).
+
+<Steps>
+  <Step title="Download and open Zadig">
+    Download the latest version of Zadig from [zadig.akeo.ie](https://zadig.akeo.ie/). It is a standalone executable — no installation is required. Open it with administrator privileges (right-click → "Run as administrator").
+  </Step>
+  <Step title="Show all devices">
+    In Zadig, open the **Options** menu and enable **List All Devices**. This ensures your target device appears in the dropdown even if it already has a driver.
+  </Step>
+  <Step title="Select your device">
+    Use the dropdown at the top of the Zadig window to select the USB device you want to configure for WebUSB. Verify the vendor ID and product ID shown match your device.
+  </Step>
+  <Step title="Select the WinUSB driver">
+    In the driver selector on the right side of the arrow, choose **WinUSB**. The current driver (if any) will be shown on the left side.
+  </Step>
+  <Step title="Install the driver">
+    Click **Replace Driver** (or **Install Driver** if no driver is currently assigned). Wait for Zadig to complete the installation. This may take a few seconds.
+
+    <Warning>
+      This action replaces the existing driver. The device will no longer work with any software that depended on the previous driver until you revert this change.
+    </Warning>
+  </Step>
+  <Step title="Verify in awawausb">
+    Open Firefox and click the awawausb extension icon. Click "List devices" and confirm your device now appears.
+  </Step>
+</Steps>
+
+## Reverting a driver change
+
+If you need to restore the original driver, open **Device Manager** (run `devmgmt.msc`), locate your device, right-click it, and select **Update driver** → **Browse my computer for drivers** → **Let me pick from a list**. Windows may offer the original driver, or you may need to reinstall the vendor's driver software.

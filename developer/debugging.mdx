@@ -1,0 +1,95 @@
+---
+title: "Debug the awawausb extension internals"
+description: "Access native stub logs, inspect the background script, issue WebUSB requests from the browser console, and disable transient activation for testing."
+---
+
+awawausb provides several debugging tools for developers working on the extension or testing WebUSB APIs. This page covers the available techniques in order of how commonly you will need them.
+
+## Disabling transient activation for testing
+
+[Transient activation](https://developer.mozilla.org/en-US/docs/Glossary/Transient_activation) is a browser security property that marks a page as "recently interacted with" — for example, after a button click. Firefox only allows permission prompts (such as USB device selection dialogs) to appear when the page has transient activation, which prevents sites from spamming users with unwanted permission requests.
+
+The problem for developers is that typing commands into the browser console does **not** grant transient activation in Firefox. If your workflow involves issuing WebUSB calls directly from the console, every `requestDevice()` call will silently fail the activation check.
+
+<Warning>
+  Only disable this check during development. Never ship or use an extension build with `DEBUG_DISABLE_TRANSIENT_ACTIVATION` set to `true` in a real browsing session, as it removes a meaningful security boundary.
+</Warning>
+
+<Steps>
+  <Step title="Open extension/page.js">
+    Find the constant `DEBUG_DISABLE_TRANSIENT_ACTIVATION` near the top of `extension/page.js`.
+  </Step>
+  <Step title="Set the flag to true">
+    ```javascript
+    const DEBUG_DISABLE_TRANSIENT_ACTIVATION = true;
+    ```
+  </Step>
+  <Step title="Reload the extension">
+    If the extension is loaded as a temporary add-on via `about:debugging`, click "Reload" to pick up the change.
+  </Step>
+</Steps>
+
+If your development workflow uses only real web pages with actual user interaction (button clicks, etc.), this change is unnecessary.
+
+## Native stub debug logs
+
+The native stub uses the [`log` crate](https://docs.rs/log) and writes all messages to `stderr`. Currently the log level is not configurable — all log messages always appear. Logs include every USB transfer along with its associated data buffers.
+
+Firefox routes the native stub's stderr output into the Browser Console, which covers the entire browser process (not just a single tab).
+
+<Steps>
+  <Step title="Open the Browser Console">
+    Use one of these methods:
+
+    - **Hamburger menu** → More tools → Browser Console
+    - **Tools menu** → Browser Tools → Browser Console
+  </Step>
+  <Step title="Reproduce the behavior you want to inspect">
+    Trigger the WebUSB operation from your page or from the browser console. Log lines from the native stub will appear in the Browser Console prefixed with the log level.
+  </Step>
+</Steps>
+
+## Background script logs
+
+The background script logs to a separate console from the Browser Console. To access it:
+
+<Steps>
+  <Step title="Open about:debugging">
+    Navigate to `about:debugging` in the Firefox address bar and select "This Firefox" in the left-hand panel.
+  </Step>
+  <Step title="Click Inspect on the awawausb extension">
+    Find the awawausb extension in the list and click its "Inspect" button. This opens a dedicated DevTools window connected to the background script.
+  </Step>
+  <Step title="Use the console and debugger tabs">
+    The Console tab shows background script log output. The Debugger tab allows you to set breakpoints and single-step through the background script code.
+  </Step>
+</Steps>
+
+## Issuing manual WebUSB requests from the console
+
+You can call `navigator.usb` methods directly from the browser console to test the extension without writing a full web page. There is one important constraint: a real page must be loaded first.
+
+<Steps>
+  <Step title="Load a real page">
+    Navigate to any HTTPS page — `example.com` works well. `about:blank` does not satisfy the page requirement and `navigator.usb` will not be injected there.
+  </Step>
+  <Step title="Open the browser console for that tab">
+    Press `F12` or use the Developer Tools shortcut to open DevTools for the tab, then select the Console panel.
+  </Step>
+  <Step title="Call navigator.usb methods">
+    You can now call WebUSB methods directly:
+
+    ```javascript
+    // List devices the extension already knows about
+    navigator.usb.getDevices().then(console.log)
+
+    // Request access to a new device (requires transient activation
+    // OR DEBUG_DISABLE_TRANSIENT_ACTIVATION = true)
+    navigator.usb.requestDevice({ filters: [] }).then(console.log)
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  If you want to single-step through the content script (`page.js`), open the Debugger tab in DevTools. The `page.js` content script appears under the label `<anonymous code>` rather than by filename.
+</Note>

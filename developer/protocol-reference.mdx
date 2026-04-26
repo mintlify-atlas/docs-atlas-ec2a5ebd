@@ -1,0 +1,441 @@
+---
+title: "Native stub JSON protocol reference"
+description: "Complete reference for the JSON messages exchanged between the awawausb browser extension and the native stub binary over stdin/stdout."
+---
+
+The extension background script and the native stub binary communicate using the standard [native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging) format: each message is a length-prefixed JSON object sent over stdin/stdout. Every message carries a `"type"` field that identifies its variant. Binary data (USB payloads) is encoded as base64url without padding.
+
+## Common fields
+
+Two fields appear in nearly every message:
+
+- **`sid`** — Session ID (string). An opaque identifier assigned by the native stub that represents a specific USB device. Sent with `NewDevice` responses and must be echoed back in all device-scoped requests.
+- **`txn_id`** — Transaction ID (string). Formatted as `"pageID-txnID"`. The browser sets this on every request; the native stub echoes it back in the corresponding `RequestComplete` or `RequestError` response so the extension can match responses to outstanding requests.
+
+## Request messages (browser → native stub)
+
+<Tabs>
+  <Tab title="Device lifecycle">
+    ### OpenDevice
+
+    Open a USB device and prepare it for transfers.
+
+    <ParamField body="type" type="string" required>
+      Always `"OpenDevice"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID of the device to open.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID in `"pageID-txnID"` format.
+    </ParamField>
+
+    ---
+
+    ### CloseDevice
+
+    Close a previously opened USB device.
+
+    <ParamField body="type" type="string" required>
+      Always `"CloseDevice"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID of the device to close.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+
+    ---
+
+    ### ResetDevice
+
+    Reset a USB device.
+
+    <ParamField body="type" type="string" required>
+      Always `"ResetDevice"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID of the device to reset.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+
+    ---
+
+    ### SetConfiguration
+
+    Set the active USB configuration.
+
+    <ParamField body="type" type="string" required>
+      Always `"SetConfiguration"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="value" type="number" required>
+      Configuration value (`bConfigurationValue`), as a `u8`.
+    </ParamField>
+  </Tab>
+  <Tab title="Interface management">
+    ### ClaimInterface
+
+    Claim exclusive access to a USB interface.
+
+    <ParamField body="type" type="string" required>
+      Always `"ClaimInterface"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="value" type="number" required>
+      Interface number (`bInterfaceNumber`), as a `u8`.
+    </ParamField>
+
+    ---
+
+    ### ReleaseInterface
+
+    Release a previously claimed interface.
+
+    <ParamField body="type" type="string" required>
+      Always `"ReleaseInterface"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="value" type="number" required>
+      Interface number to release, as a `u8`.
+    </ParamField>
+
+    ---
+
+    ### SetAltInterface
+
+    Select an alternate setting for an interface.
+
+    <ParamField body="type" type="string" required>
+      Always `"SetAltInterface"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="iface" type="number" required>
+      Interface number, as a `u8`.
+    </ParamField>
+    <ParamField body="alt" type="number" required>
+      Alternate setting number, as a `u8`.
+    </ParamField>
+  </Tab>
+  <Tab title="Transfers">
+    ### ControlTransfer
+
+    Perform a USB control transfer. For host-to-device transfers, provide `data`. For device-to-host transfers, provide `length`.
+
+    <ParamField body="type" type="string" required>
+      Always `"ControlTransfer"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="request_type" type="number" required>
+      `bmRequestType` byte, as a `u8`.
+    </ParamField>
+    <ParamField body="request" type="number" required>
+      `bRequest` byte, as a `u8`.
+    </ParamField>
+    <ParamField body="value" type="number" required>
+      `wValue` field, as a `u16`.
+    </ParamField>
+    <ParamField body="index" type="number" required>
+      `wIndex` field, as a `u16`.
+    </ParamField>
+    <ParamField body="data" type="string">
+      Host-to-device payload, encoded as base64url without padding. Present only for OUT transfers.
+    </ParamField>
+    <ParamField body="length" type="number">
+      Maximum number of bytes to read from the device, as a `u16`. Present only for IN transfers. Maximum value is `0xffff`; larger values will result in a `RequestTooBig` error.
+    </ParamField>
+    <ParamField body="_timeout_internal" type="number">
+      Internal use only. Timeout in milliseconds as a `u64`. Not intended to be set by external callers.
+    </ParamField>
+
+    ---
+
+    ### DataTransfer
+
+    Perform a bulk or interrupt transfer on an endpoint. For OUT transfers, provide `data`. For IN transfers, provide `length`.
+
+    <ParamField body="type" type="string" required>
+      Always `"DataTransfer"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="ep" type="number" required>
+      Endpoint address (`bEndpointAddress`), as a `u8`. The direction bit is part of this value.
+    </ParamField>
+    <ParamField body="data" type="string">
+      OUT payload, base64url encoded without padding.
+    </ParamField>
+    <ParamField body="length" type="number">
+      Maximum bytes to read for an IN transfer, as a `u32`.
+    </ParamField>
+
+    ---
+
+    ### ClearHalt
+
+    Clear the halt/stall condition on an endpoint.
+
+    <ParamField body="type" type="string" required>
+      Always `"ClearHalt"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="ep" type="number" required>
+      Endpoint address, as a `u8`.
+    </ParamField>
+
+    ---
+
+    ### IsocTransfer
+
+    Perform an isochronous transfer. The `pkt_len` array defines the packet sizes; its length determines the number of packets in the transfer.
+
+    <ParamField body="type" type="string" required>
+      Always `"IsocTransfer"`.
+    </ParamField>
+    <ParamField body="sid" type="string" required>
+      Session ID.
+    </ParamField>
+    <ParamField body="txn_id" type="string" required>
+      Transaction ID.
+    </ParamField>
+    <ParamField body="ep" type="number" required>
+      Endpoint address, as a `u8`.
+    </ParamField>
+    <ParamField body="data" type="string">
+      OUT payload for the entire transfer, base64url encoded without padding. The `pkt_len` array slices this into individual packets.
+    </ParamField>
+    <ParamField body="pkt_len" type="number[]" required>
+      Array of per-packet lengths as `u32` values. The number of elements equals the number of isochronous packets. Excessively large arrays will result in a `RequestTooBig` error.
+    </ParamField>
+  </Tab>
+</Tabs>
+
+## Response messages (native stub → browser)
+
+<Tabs>
+  <Tab title="Device events">
+    ### NewDevice
+
+    Sent whenever a USB device is connected and enumerated by the native stub. Not correlated to any request.
+
+    <ResponseField name="type" type="string" required>
+      Always `"NewDevice"`.
+    </ResponseField>
+    <ResponseField name="sid" type="string" required>
+      Opaque session ID assigned to this device. Use this value in all subsequent requests targeting this device.
+    </ResponseField>
+    <ResponseField name="bcdUSB" type="number" required>
+      USB specification version number (BCD-encoded `u16`).
+    </ResponseField>
+    <ResponseField name="bDeviceClass" type="number" required>
+      USB device class code (`u8`).
+    </ResponseField>
+    <ResponseField name="bDeviceSubClass" type="number" required>
+      USB device subclass code (`u8`).
+    </ResponseField>
+    <ResponseField name="bDeviceProtocol" type="number" required>
+      USB device protocol code (`u8`).
+    </ResponseField>
+    <ResponseField name="idVendor" type="number" required>
+      Vendor ID (`u16`).
+    </ResponseField>
+    <ResponseField name="idProduct" type="number" required>
+      Product ID (`u16`).
+    </ResponseField>
+    <ResponseField name="bcdDevice" type="number" required>
+      Device release number (BCD-encoded `u16`).
+    </ResponseField>
+    <ResponseField name="manufacturer" type="string">
+      Manufacturer string from the device descriptor, if present.
+    </ResponseField>
+    <ResponseField name="product" type="string">
+      Product string from the device descriptor, if present.
+    </ResponseField>
+    <ResponseField name="serial" type="string">
+      Serial number string from the device descriptor, if present.
+    </ResponseField>
+    <ResponseField name="current_config" type="number" required>
+      Currently active configuration value (`u8`).
+    </ResponseField>
+    <ResponseField name="configs" type="object[]" required>
+      Array of `DeviceConfiguration` objects describing all available configurations. Each configuration has `bConfigurationValue` (`u8`), `iConfiguration` (`u8`), and `interfaces` (array of `DeviceInterface`). Each `DeviceInterface` has interface descriptor fields, `current_alt_setting`, and an `endpoints` array of `DeviceEndpoint` objects with `bEndpointAddress`, `bmAttributes`, and `wMaxPacketSize`.
+    </ResponseField>
+
+    ---
+
+    ### UnplugDevice
+
+    Sent whenever a USB device is disconnected.
+
+    <ResponseField name="type" type="string" required>
+      Always `"UnplugDevice"`.
+    </ResponseField>
+    <ResponseField name="sid" type="string" required>
+      Session ID of the device that was removed.
+    </ResponseField>
+  </Tab>
+  <Tab title="Transfer results">
+    ### RequestComplete
+
+    Sent when a non-isochronous request completes successfully.
+
+    <ResponseField name="type" type="string" required>
+      Always `"RequestComplete"`.
+    </ResponseField>
+    <ResponseField name="txn_id" type="string" required>
+      Transaction ID from the originating request.
+    </ResponseField>
+    <ResponseField name="babble" type="boolean" required>
+      `true` if the device sent more data than the requested `length` (babble condition).
+    </ResponseField>
+    <ResponseField name="data" type="string">
+      Data received from the device for IN transfers, base64url encoded without padding. Absent for OUT transfers.
+    </ResponseField>
+    <ResponseField name="bytes_written" type="number" required>
+      Number of bytes written to the device for OUT transfers (`u64`). Zero for IN transfers.
+    </ResponseField>
+
+    ---
+
+    ### RequestError
+
+    Sent when a request fails.
+
+    <ResponseField name="type" type="string" required>
+      Always `"RequestError"`.
+    </ResponseField>
+    <ResponseField name="txn_id" type="string" required>
+      Transaction ID from the originating request.
+    </ResponseField>
+    <ResponseField name="error" type="string" required>
+      One of the error code strings from the `Errors` enum. See [Error codes](#error-codes) below.
+    </ResponseField>
+    <ResponseField name="bytes_written" type="number" required>
+      Number of bytes written before the error occurred (`u64`). May be non-zero for partial writes.
+    </ResponseField>
+
+    ---
+
+    ### IsocRequestComplete
+
+    Sent when an isochronous request completes. Each packet has an individual status entry.
+
+    <ResponseField name="type" type="string" required>
+      Always `"IsocRequestComplete"`.
+    </ResponseField>
+    <ResponseField name="txn_id" type="string" required>
+      Transaction ID from the originating request.
+    </ResponseField>
+    <ResponseField name="data" type="string">
+      Data received for IN isochronous transfers, base64url encoded without padding. Absent for OUT transfers.
+    </ResponseField>
+    <ResponseField name="pkt_status" type="string[]" required>
+      Per-packet status array. Each element is one of `"Ok"`, `"Babble"`, or `"Error"`. The length matches the number of packets in the original request.
+    </ResponseField>
+    <ResponseField name="pkt_len" type="number[]" required>
+      Actual number of bytes transferred for each packet (`u32[]`).
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+## Error codes
+
+These values appear in the `"error"` field of a `RequestError` message.
+
+| Code | Meaning |
+|---|---|
+| `DeviceNotFound` | The device ID is bogus, or the device was surprise-removed between the request being sent and processed. |
+| `RequestTooBig` | The request exceeds a platform limit — e.g. a control transfer larger than `0xffff` bytes, or an isochronous transfer with too many packets. Platform-specific quirks are not hidden. |
+| `Stall` | The device returned a USB STALL condition on the endpoint. |
+| `TransferError` | An unspecified transfer error occurred. |
+| `InvalidState` | The requested operation cannot be performed in the current state — e.g. attempting a transfer on a device that has not been opened, or on an interface that has not been claimed. |
+| `InvalidNumber` | The specified interface or endpoint number is not valid for this device. |
+| `AlreadyClaimed` | The requested interface is already claimed (by this session or another). |
+
+## Example exchange
+
+The following shows a complete `OpenDevice` request followed by a successful `RequestComplete` response.
+
+```json
+// Browser → native stub
+{
+  "type": "OpenDevice",
+  "sid": "abc123",
+  "txn_id": "42-1"
+}
+```
+
+```json
+// Native stub → browser
+{
+  "type": "RequestComplete",
+  "txn_id": "42-1",
+  "babble": false,
+  "data": null,
+  "bytes_written": 0
+}
+```
+
+A control IN transfer (device-to-host) and its response:
+
+```json
+// Browser → native stub
+{
+  "type": "ControlTransfer",
+  "sid": "abc123",
+  "txn_id": "42-2",
+  "request_type": 128,
+  "request": 6,
+  "value": 256,
+  "index": 0,
+  "length": 18
+}
+```
+
+```json
+// Native stub → browser
+{
+  "type": "RequestComplete",
+  "txn_id": "42-2",
+  "babble": false,
+  "data": "BBAGAAAAAQIDBA",
+  "bytes_written": 0
+}
+```

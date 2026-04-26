@@ -1,0 +1,101 @@
+---
+title: "Install and configure the native manifest"
+description: "Set up the native messaging manifest so Firefox can find the awawausb native stub binary, with paths for macOS, Linux, and Windows."
+---
+
+The native manifest is a JSON file that tells Firefox where to find the native stub binary on your system. Without it, the extension cannot launch the stub and WebUSB requests will fail. Firefox reads this file at startup based on a fixed set of locations defined per operating system.
+
+## Manifest contents
+
+The manifest file must be named `awawausb_native_stub.json` and contain the following:
+
+```json
+{
+  "name": "awawausb_native_stub",
+  "description": "Allows WebUSB extension to access USB devices",
+  "path": "/path/to/awawausb-native-stub",
+  "type": "stdio",
+  "allowed_extensions": ["awawausb@arcanenibble.com"]
+}
+```
+
+Replace `/path/to/awawausb-native-stub` with the absolute path to the compiled binary on your system.
+
+<Note>
+  On Windows, a full path is not required. Setting `"path"` to just `"awawausb-native-stub.exe"` is sufficient, provided the binary is on the system `PATH`.
+</Note>
+
+## Manifest file location
+
+Place the manifest file in one of the following locations depending on your operating system and whether you want a system-wide or per-user installation.
+
+<Tabs>
+  <Tab title="macOS">
+    **Global (all users):**
+
+    ```
+    /Library/Application Support/Mozilla/NativeMessagingHosts/awawausb_native_stub.json
+    ```
+
+    **User-local:**
+
+    ```
+    ~/Library/Application Support/Mozilla/NativeMessagingHosts/awawausb_native_stub.json
+    ```
+  </Tab>
+  <Tab title="Linux">
+    **Global (all users):**
+
+    ```
+    /usr/lib/mozilla/native-messaging-hosts/awawausb_native_stub.json
+    ```
+
+    ```
+    /usr/lib64/mozilla/native-messaging-hosts/awawausb_native_stub.json
+    ```
+
+    **User-local:**
+
+    ```
+    ~/.mozilla/native-messaging-hosts/awawausb_native_stub.json
+    ```
+  </Tab>
+  <Tab title="Windows">
+    On Windows, the manifest file can be placed anywhere on the filesystem. A registry key must then be created whose default value is the absolute path to the manifest file.
+
+    **Global (all users) — `HKLM`:**
+
+    ```
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\awawausb_native_stub
+    ```
+
+    **User-local — `HKCU`:**
+
+    ```
+    HKCU\SOFTWARE\Mozilla\NativeMessagingHosts\awawausb_native_stub
+    ```
+
+    The default value (type `REG_SZ`) of the registry key must be the full path to the `awawausb_native_stub.json` manifest file, for example:
+
+    ```
+    C:\Users\you\AppData\Local\awawausb\awawausb_native_stub.json
+    ```
+  </Tab>
+</Tabs>
+
+## Automated installer
+
+<Note>
+  If you are using the prebuilt binary distribution, you do not need to set this up manually. Running `install.sh` on macOS or Linux, or `install.bat` on Windows, automatically copies the binary to an appropriate location and writes the manifest file (and registry key on Windows) for you.
+</Note>
+
+## Unusual configurations
+
+<Warning>
+  The native manifest mechanism relies on absolute paths, which causes problems with certain configurations:
+
+  - **Shared `*nix` home directories** across machines with different CPU architectures (e.g. an NFS home shared between an x86\_64 workstation and an aarch64 server).
+  - **Windows roaming user profiles** across computers with different CPU architectures.
+
+  In these cases the manifest's `"path"` field will point to the wrong binary on one of the machines. There is no built-in fix for this. You will need to devise an ad-hoc workaround, such as maintaining separate manifests per machine or wrapping the binary in an architecture-dispatching shell script.
+</Warning>

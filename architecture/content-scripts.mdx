@@ -1,0 +1,93 @@
+---
+title: "Content script architecture: isolated vs main world"
+description: "How awawausb uses two content scripts per page — one in ISOLATED world for messaging, one in MAIN world for the WebUSB API surface."
+---
+
+Every web page the user visits gets two content scripts injected at `document_start`. One runs in the `ISOLATED` world (the extension's sandboxed JavaScript context); the other runs in the `MAIN` world (the same JavaScript environment as the page itself). Together they implement the full WebUSB API surface that the page can interact with. Neither script can do this alone — each can do something the other cannot.
+
+## Why two scripts are required
+
+<Tabs>
+  <Tab title="ISOLATED world">
+    The isolated script runs in a separate JavaScript context from the page. This gives it access to the browser's `runtime.postMessage` API, which it uses to send USB requests to the background script and receive responses.
+
+    The downside is that exposing complex JavaScript objects — such as class instances with private fields, prototype methods, and event dispatch — to the page from an isolated context is difficult or impossible. The isolated script therefore does not try to implement any WebUSB types directly.
+
+    **What the isolated script does:**
+
+    - Exposes an async function (`__awawausb_send_request`) to the main script by injecting it into `window` before the main script runs.
+    - Maintains a `Map` of pending request IDs to `[resolve, reject]` Promise pairs, matching incoming responses from the background script to the correct waiting caller.
+    - Accepts a callback from the main script (`__awawausb_set_event_cb`) to forward device connect/disconnect events.
+    - Passes all USB operations as `postMessage` calls to the background script.
+  </Tab>
+  <Tab title="MAIN world">
+    The main script runs in the same JavaScript environment as the page, which means it can define classes with private fields, extend `EventTarget`, and install properties on `window` that behave exactly like native browser APIs.
+
+    The downside is that it cannot use `browser.runtime.postMessage` or any other privileged extension API. All communication with the background script must go through the isolated script.
+
+    **What the main script does:**
+
+    - Implements `USBDevice`, `USBConnectionEvent`, `USBInTransferResult`, `USBOutTransferResult`, and related WebUSB types as proper ES6 classes.
+    - Implements `navigator.usb` as a `USB` object that extends `EventTarget`.
+    - Calls the isolated script's async function for every USB operation.
+    - Dispatches `connect` and `disconnect` events on `navigator.usb` when the isolated script's event callback fires.
+    - Maintains a `Map` from device handle numbers to `USBDevice` instances to preserve object identity (repeated calls for the same device return the same object).
+  </Tab>
+</Tabs>
+
+## Interface handshake between the two scripts
+
+The isolated script runs first (both scripts are injected at `document_start`, but the isolated script injects the interface into `window` before the main script executes). The main script captures the injected interface methods and immediately removes them from `window`:
+
+```javascript
+// In page.js (main world script)
+const __awawausb_send_request = window.__awawausb_send_request;
+delete window.__awawausb_send_request;
+
+window.__awawausb_set_event_cb(notification_handler);
+delete window.__awawausb_set_event_cb;
+```
+
+After this, `__awawausb_send_request` and `__awawausb_set_event_cb` are no longer accessible from the page's JavaScript environment. The main script holds private references to them in closures.
+
+<Note>
+All interface methods are injected into `window` and immediately deleted once the main script captures them. This limits the window of opportunity for a malicious page script to intercept or replace them, though the precise security guarantees of this approach depend on script injection ordering.
+</Note>
+
+## API availability
+
+<Info>
+The WebUSB API is only installed when `window.isSecureContext` is `true`. This means it is available on HTTPS pages and on `localhost`, but not on plain HTTP pages. The main script exits immediately without installing anything if the page is not a secure context. The API is also not available in Web Workers.
+</Info>
+
+## Event flow for device connect/disconnect
+
+When the background script detects a new USB device that a page has been granted access to, it sends a `postMessage` event to the isolated script. The isolated script calls the event callback registered by the main script. The main script creates a new `USBDevice` instance (or retrieves the existing one from `dev_handle_to_obj_map`) and dispatches a `USBConnectionEvent` on `navigator.usb`:
+
+```javascript
+function notification_handler(m) {
+    if (m.event === "unplug") {
+        let dev = dev_handle_to_obj_map.get(m.dev_handle);
+        if (dev !== undefined) {
+            dev_handle_to_obj_map.delete(m.dev_handle);
+            the_usb_obj.dispatchEvent(new USBConnectionEvent('disconnect', {device: dev}));
+        }
+    } else if (m.event === "plug") {
+        let usb_device = new USBDevice({ [DEV_HANDLE]: m.dev_handle, descriptors: m.dev_data });
+        dev_handle_to_obj_map.set(m.dev_handle, usb_device);
+        the_usb_obj.dispatchEvent(new USBConnectionEvent('connect', {device: usb_device}));
+    }
+}
+```
+
+## Summary comparison
+
+| Concern | ISOLATED world script | MAIN world script |
+|---|---|---|
+| Can use `runtime.postMessage` | Yes | No |
+| Can define classes visible to the page | No | Yes |
+| Can extend `EventTarget` for the page | No | Yes |
+| Holds permission/consent state | No | No (background script does) |
+| Holds device objects for the page | No | Yes (`dev_handle_to_obj_map`) |
+| Knows about background script protocol | Yes | No (calls isolated script's function) |
+| Exposed to malicious page scripts | No (isolated context) | Yes (same JS environment) |

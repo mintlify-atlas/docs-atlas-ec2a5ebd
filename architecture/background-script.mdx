@@ -1,0 +1,81 @@
+---
+title: "Extension background script design"
+description: "How the awawausb background script manages device state, transaction routing, permission enforcement, and auxiliary pages like the debug UI."
+---
+
+The background script (`extension/awawausb.js`) is a persistent, privileged JavaScript script that runs for the entire lifetime of the browser. It is the only component that can issue native messaging calls to the native stub and the only component that holds permission state. Everything in the extension either talks to it or is launched by it. Because it sits between unprivileged web pages and the OS-level native stub, it is the primary security boundary of the extension.
+
+## Outstanding transactions router
+
+Every USB request that passes through the system carries a **transaction ID** — an opaque string to the Rust native stub, but parsed by the JavaScript layer as `pageID-txnID`. The background script maintains a global `usb_txns` Map keyed by these strings.
+
+```javascript
+// All outstanding transactions, indexed by `pageID-txnID`
+let usb_txns = new Map();
+```
+
+When a response arrives from the native stub, the background script looks up the transaction ID in `usb_txns` and dispatches accordingly:
+
+- **Page 0 (internal)**: The map entry holds `[resolve, reject]` functions for a `Promise`. The background script uses these for control transfers it issues itself — for example, fetching WebUSB descriptors — converting the message-passing interface into JavaScript async.
+- **Page 1, 2, … (web pages)**: The map entry holds a `PageTransaction` object whose callback eventually calls `postMessage` back to the originating page, optionally updating device state first (for example, when an `OpenDevice` or `ClaimInterface` completes).
+
+The `PageTransaction` class tracks an `alive` flag so that callbacks for obsolete transactions (e.g., from a page that was closed) can be silently dropped.
+
+## Permission management
+
+The background script is responsible for enforcing that web pages only receive access to devices the user has explicitly allowed. The permission flow works as follows:
+
+1. A page calls `navigator.usb.requestDevice(filters)`.
+2. The background script identifies USB devices matching the filters (from its local `usb_devices` Map).
+3. A `UserPermissionDialog` is opened — a small extension popup window — showing the matching devices.
+4. The permission page is given only the **session IDs** of candidate devices (not full device objects), and fetches device strings from the background script via a request-response message.
+5. The user selects a device or cancels. The result is sent back to the background script via `runtime.onMessage`.
+6. If approved, the background script records the granted device in per-page state and returns a device handle to the content script.
+
+The permission page is opened with query parameters encoding the permission request ID and candidate session IDs:
+
+```javascript
+let args = new URLSearchParams();
+args.set("req", this_permission_request_id);
+for (let sid of possible_sids)
+    args.append("sid", sid);
+browser.windows.create({ url: `/permission-page/permission.html?${args.toString()}`, ... });
+```
+
+If the user closes the permission window without selecting a device, the `windows.onRemoved` listener detects this and resolves the pending Promise with `null` (indicating cancellation).
+
+## Device tracking and multiplexing
+
+The background script mirrors all USB device state received from the native stub in a global `usb_devices` Map keyed by session ID. When the native stub sends a `NewDevice` message, the background script stores the full descriptor data. When it sends `UnplugDevice`, the entry is removed.
+
+Because one native stub serves multiple web pages, the background script must also track per-page device state. The `PerPageUSBDevice` class records, for each device instance a page holds:
+
+- Whether the device is open (`opened`)
+- Which interfaces the page has claimed (`claimed_interfaces`)
+- The set of in-flight transactions for this device on this page (`transactions`)
+
+This allows the background script to do **reference counting** for open and claim operations. If two pages have opened the same device, the background script knows not to issue a `CloseDevice` to the native stub until both pages have closed it.
+
+## WebUSB descriptor fetching
+
+When a `NewDevice` event arrives, the background script uses **page 0 internal transfers** to fetch the WebUSB platform capability descriptor from the device. If the device advertises a landing page URL (the WebUSB device URL descriptor), the background script fires a browser notification. Clicking the notification opens a new tab to the suggested URL.
+
+```javascript
+browser.notifications.onClicked.addListener(async (notif_id) => {
+    let landing_page_url = notification_toasts.get(notif_id);
+    await browser.notifications.clear(notif_id);
+    await browser.tabs.create({ url: landing_page_url });
+});
+```
+
+Internal control transfers use `txn_id` values in the `0-N` format, ensuring they are routed back through the internal Promise resolver rather than to any page.
+
+## Auxiliary pages
+
+**Debug page**: Opened when the user clicks the toolbar button. It communicates with the background script using the one-off request-response messaging API (`runtime.sendMessage`) to request a dump of the current JavaScript internal state (devices, transactions, page state). This is purely a diagnostic tool.
+
+**Permission page**: Opened programmatically when a page calls `requestDevice`. It receives candidate device session IDs via URL query parameters and fetches human-readable device strings (manufacturer, product, serial) from the background script using a synchronous request-response message. The page ID is also encoded in the query parameters so the background script can match the approval or denial back to the correct waiting page.
+
+<Note>
+The background script code has not been refactored since it was originally written. It primarily consists of several large functions with accumulated state mutations. There is no architectural mitigation preventing device state from getting out of sync between the native stub, the background script, and individual page content scripts. Correctness depends on careful coding throughout.
+</Note>

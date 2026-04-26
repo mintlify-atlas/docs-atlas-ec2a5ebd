@@ -1,0 +1,64 @@
+---
+title: "What is WebUSB? Device APIs explained"
+description: "Learn how WebUSB differs from WebHID, Web Serial, Web Bluetooth, and other browser device APIs, and when each one is the right choice for your hardware."
+---
+
+Web browsers expose several distinct APIs for communicating with physical devices — WebUSB, WebHID, Web Serial, Web MIDI, Web Bluetooth, and Web NFC. Even though many devices today use USB connectors to plug into a computer, the USB connector alone does not determine which browser API applies. The choice of API is shaped by the history of how programmers have understood and categorized hardware, not by any inherent property of the device itself. Understanding these distinctions helps you select the right API and diagnose why a device might not be accessible through WebUSB.
+
+<Note>
+Even though many devices physically connect via USB, they may be accessed through a different browser API — or through no special API at all. The USB connector and the WebUSB API are not the same thing.
+</Note>
+
+Some peripherals — the mouse, keyboard, and screen — are treated as universal by the browser. Web pages always have access to keyboard input and pointer events when the page has focus, and can display content on screen, without requesting any special permission. Devices that act like a keyboard or mouse to the operating system (such as barcode scanners or drawing tablets) fall into this category as well, even if they look nothing like a keyboard or mouse.
+
+<Tip>
+If your device is not a keyboard, mouse, gamepad, camera, microphone, printer, network adapter, or music instrument, and it plugs in via USB — WebUSB is probably the right API.
+</Tip>
+
+## Browser device APIs compared
+
+<AccordionGroup>
+  <Accordion title="WebUSB">
+    WebUSB is the catch-all for USB devices that are none of the more specific categories below. It gives a web page direct, low-level access to a USB device that has not been claimed by any of the operating system's higher-level drivers.
+
+    If a device does not fit neatly into any recognized category — it is not an input device, not a serial adapter, not a music instrument, not a Bluetooth peripheral — WebUSB is likely the correct interface. This commonly includes custom hardware, lab instruments, industrial devices, and embedded systems designed specifically to be controlled from a browser.
+
+    WebUSB requires an explicit user gesture (a call to `navigator.usb.requestDevice()`) and the user must grant permission before a page can communicate with the device.
+  </Accordion>
+
+  <Accordion title="WebHID">
+    HID (Human Interface Device) is a USB device class originally designed for input peripherals like mice, keyboards, and game controllers, but later adopted by many devices that have nothing to do with human input, such as uninterruptible power supplies and environmental sensors.
+
+    WebHID is the preferred interface for accessing non-standard or advanced features of HID devices — for example, configuring the settings of a keyboard or reading non-button data from a specialized peripheral. Standard keyboard and mouse functionality is intentionally blocked from WebHID for security reasons.
+
+    If a device is a game controller or gamepad, the [Gamepad API](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API) covers standard button and axis input, while WebHID covers device-specific features not exposed through the Gamepad API.
+  </Accordion>
+
+  <Accordion title="Web Serial">
+    Serial ports predate personal computers and have a long history of being reused for a wide variety of peripheral devices. Although USB eventually replaced serial ports for consumer hardware, serial communication persists in specialized domains because of its simplicity and long track record.
+
+    Web Serial is used for devices with cultural and technical ties to industry and telecommunications — commonly 3D printers, microcontroller development boards (such as Arduino), and industrial or scientific instruments. These devices typically use a USB-to-serial adapter chip to present themselves as a serial port even though they physically connect via USB.
+  </Accordion>
+
+  <Accordion title="Web MIDI">
+    MIDI (Musical Instrument Digital Interface) is a long-established standard for communication between electronic musical instruments. Despite using USB connectors on modern hardware, MIDI devices have maintained a distinct identity and user community separate from general computing.
+
+    Web MIDI covers USB devices that are related to making music and that implement the MIDI protocol. If a device is intended for music production — synthesizers, drum machines, MIDI controllers, audio interfaces — Web MIDI is likely the correct API.
+  </Accordion>
+
+  <Accordion title="Web Bluetooth">
+    Bluetooth encompasses two largely unrelated wireless technologies: Bluetooth Classic and Bluetooth Low Energy (BLE). Despite the name, the Web Bluetooth API covers only Bluetooth Low Energy, specifically the Generic Attribute Profile (GATT).
+
+    Web Bluetooth is the right choice for wireless devices designed primarily for use with mobile phones or tablets — fitness trackers, smart sensors, BLE peripherals. Note that input devices such as wireless mice and keyboards are treated as special even over Bluetooth and are not accessible through Web Bluetooth.
+  </Accordion>
+
+  <Accordion title="Web NFC">
+    Web NFC is a highly limited API that allows web pages — on Chrome for Android only — to interact with a very specific subset of NFC devices (NDEF tags). It was designed for narrow "physical interaction" use cases on mobile phones.
+
+    Despite NFC readers being available as USB peripherals or built into laptops, these cannot be used with Web NFC. They also cannot be used with WebUSB. NFC technology is closely associated with large-scale institutional applications (payments, transit, physical access control, government documents), which has caused browser vendors to treat desktop NFC access as out of scope for web APIs.
+
+    <Note>
+      If you have requirements for NFC smart card access on desktop, PKCS #11 is an older technology used for cryptographic device management that some NFC readers support, but it is not a web API.
+    </Note>
+  </Accordion>
+</AccordionGroup>

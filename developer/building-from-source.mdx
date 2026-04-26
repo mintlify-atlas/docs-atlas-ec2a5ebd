@@ -1,0 +1,103 @@
+---
+title: "Build awawausb from source"
+description: "Compile the awawausb native stub from Rust source using cargo build, with platform-specific notes for macOS, Linux, and Windows cross-compilation."
+---
+
+The native stub is written entirely in Rust and can be built using standard cargo tooling. The extension JavaScript does not require any compilation step — only the native stub binary needs to be built.
+
+## Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) installed via `rustup`
+- `cargo` (included with rustup)
+
+## Basic build
+
+<Steps>
+  <Step title="Enter the native-stub directory">
+    ```bash
+    cd native-stub
+    ```
+  </Step>
+  <Step title="Build the stub">
+    ```bash
+    cargo build
+    ```
+
+    For a release (optimized) build:
+
+    ```bash
+    cargo build --release
+    ```
+  </Step>
+  <Step title="Locate the binary">
+    The compiled binary is at `target/debug/awawausb-native-stub` (or `target/release/awawausb-native-stub` for a release build). On Windows the filename ends in `.exe`.
+  </Step>
+</Steps>
+
+## Platform notes
+
+<Tabs>
+  <Tab title="macOS">
+    Building on macOS should just work. The repository includes a vendored copy of all the `.tbd` files needed to link the final binary.
+
+    If this causes problems for any reason, you can disable the vendored entries in `.cargo/config.toml`. Doing so requires a macOS SDK to be installed on the build machine.
+  </Tab>
+  <Tab title="Linux">
+    Prebuilt binaries use [musl libc](https://www.musl-libc.org/) with Rust's default static linking, producing binaries that work across any Linux distribution.
+
+    If you prefer a glibc-linked build, change the appropriate `RUSTFLAGS` in your environment or in `.cargo/config.toml`. Glibc builds should work but are not tested.
+  </Tab>
+  <Tab title="Windows">
+    Prebuilt binaries use [mingw-w64](https://www.mingw-w64.org/) targeting the UCRT, corresponding to the `*-windows-gnullvm` targets in Rust.
+
+    <Warning>
+      The MSVC toolchain is **not supported**. There is no fundamental technical reason it cannot work, but it has not been tested.
+    </Warning>
+
+    **Building on Windows:** This is expected to work, but may require adding the `rust-mingw` component:
+
+    ```bash
+    rustup component add rust-mingw
+    ```
+
+    See the [rustc platform support docs](https://doc.rust-lang.org/nightly/rustc/platform-support/windows-gnullvm.html#building-rust-programs) for details.
+
+    **Cross-compiling from Linux or macOS:** You need mingw-w64 `.lib` files. The Dockerfile shows how to build these from source. There is a hardcoded path in `.cargo/config.toml` that must be updated to point to your local copy of the mingw-w64 sysroot.
+  </Tab>
+</Tabs>
+
+## Cross-compilation
+
+Cross-compilation is supported and configured by default for all six release targets. The `Dockerfile` in the repository root contains the complete setup, including how to build the required mingw-w64 libraries for Windows targets.
+
+**Supported targets:**
+
+| Target triple | Platform |
+|---|---|
+| `x86_64-apple-darwin` | macOS x86\_64 |
+| `aarch64-apple-darwin` | macOS ARM64 |
+| `x86_64-unknown-linux-musl` | Linux x86\_64 (musl) |
+| `aarch64-unknown-linux-musl` | Linux aarch64 (musl) |
+| `x86_64-pc-windows-gnullvm` | Windows AMD64 (mingw-w64 UCRT) |
+| `aarch64-pc-windows-gnullvm` | Windows ARM64 (mingw-w64 UCRT) |
+
+First, add the target to your Rust toolchain:
+
+```bash
+rustup target add <target-triple>
+```
+
+Then build for that target:
+
+```bash
+cargo build --release --target x86_64-apple-darwin
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-unknown-linux-musl
+cargo build --release --target aarch64-unknown-linux-musl
+cargo build --release --target x86_64-pc-windows-gnullvm
+cargo build --release --target aarch64-pc-windows-gnullvm
+```
+
+<Note>
+  The macOS release distribution uses a universal binary created by combining both Apple Silicon and Intel builds with `llvm-lipo`. The Linux and Windows builds are distributed as separate per-architecture binaries.
+</Note>

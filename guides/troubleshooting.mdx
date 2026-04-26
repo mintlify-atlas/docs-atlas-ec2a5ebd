@@ -1,0 +1,78 @@
+---
+title: "Troubleshoot awawausb connection issues"
+description: "Diagnose and fix common problems with the awawausb extension, from missing devices to native stub errors and platform-specific issues."
+---
+
+awawausb includes a built-in debug page accessible directly from the browser toolbar. This page is the first place to check when something is not working — it shows you whether the extension can see your USB devices and whether the native stub is connected. Most problems either show up immediately here or can be narrowed down based on what the debug page reports.
+
+## Using the debug page
+
+To open the debug page:
+
+1. Click the awawausb icon in the Firefox toolbar. If you do not see it, click the **Extensions** (puzzle piece) icon first and look for awawausb in the list.
+2. The extension popup opens. Click **List devices** to see all USB devices the extension currently knows about.
+
+If a device you expect to use does not appear in the list, the problem is at the operating system level — the browser and the extension are not involved. You will need to make configuration changes outside the browser (which may require administrator permissions). See the platform-specific sections below.
+
+If the device does appear in the list but your web page still cannot access it, see the FAQ below.
+
+## Native stub connection issues
+
+The awawausb extension communicates with the native stub at startup using Firefox's [native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging) mechanism. The stub is a small program installed separately on your computer that performs the actual USB communication on the extension's behalf.
+
+If the native stub disconnects or fails to start, the extension icon in the toolbar will change to indicate an error. The debug page will also display an error message describing what went wrong.
+
+The most common cause of native stub failures is an incorrectly installed or misconfigured native manifest. The manifest is a JSON file in a platform-specific location that tells Firefox where to find the native stub binary. See the [native manifest setup](/developer/native-manifest) documentation for the correct file locations and required contents.
+
+## Platform-specific issues
+
+### Windows
+
+If a device does not appear in "List devices" on Windows, the device is likely not using the WinUSB driver. awawausb can only access devices that use WinUSB. See [WinUSB driver setup for WebUSB on Windows](/guides/windows-winusb) for instructions on checking and changing the driver.
+
+### Linux
+
+If a device does not appear in "List devices" on Linux, the device node under `/dev/bus/usb` is likely not accessible to your user account due to default permission restrictions. See [Configure USB device permissions on Linux](/guides/linux-usb-permissions) for instructions on setting up udev rules.
+
+### Unusual configurations
+
+<Warning>
+The native manifest installer uses absolute paths to the stub binary. If your setup involves a shared home directory across computers with different CPU architectures, or Windows roaming user profiles across machines with different CPU architectures, the installed manifest will point to the wrong binary on some machines. There is no automated fix for this — you will need to create an ad-hoc workaround appropriate for your environment, such as per-machine manifest files or a wrapper script.
+</Warning>
+
+## Frequently asked questions
+
+<AccordionGroup>
+  <Accordion title="The extension is installed but navigator.usb is undefined">
+    The WebUSB API is only available in [secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). Your page must be served over HTTPS or from `localhost`. Pages served over plain HTTP will not have access to `navigator.usb`.
+
+    Additionally, `navigator.usb` is not available inside [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API). It is only accessible on the main page thread. This is a known limitation of the awawausb extension compared to Chrome's built-in WebUSB implementation.
+  </Accordion>
+
+  <Accordion title="A device appears in 'List devices' but my web page cannot access it">
+    A device appearing in "List devices" means the extension can see it at the OS level. However, individual web pages must still request permission to use a specific device.
+
+    Your page must call `navigator.usb.requestDevice()` with appropriate filters, which triggers a browser permission prompt. The user must select the device and click **Connect** (or equivalent) before the page can communicate with it. A device that has never been granted permission to a page will appear in "List devices" but remain inaccessible to that page.
+
+    Check that your page is calling `requestDevice()` in response to a user gesture (such as a button click), as browsers require this.
+  </Accordion>
+
+  <Accordion title="The native stub keeps disconnecting">
+    If the native stub repeatedly disconnects, check the following:
+
+    - **The native manifest path is correct.** The `path` field in the manifest JSON must point to the actual location of the `awawausb-native-stub` binary. If the binary was moved after installation, update the manifest.
+    - **The binary is executable.** On Linux and macOS, run `ls -l /path/to/awawausb-native-stub` and confirm the execute bit is set. If not, run `chmod +x /path/to/awawausb-native-stub`.
+    - **The manifest is in the correct location.** Firefox looks for native manifests in specific directories depending on your platform. Refer to the [native manifest setup](/developer/native-manifest) documentation for the correct paths.
+  </Accordion>
+</AccordionGroup>
+
+## Related guides
+
+<CardGroup cols={2}>
+  <Card title="Linux USB permissions" href="/guides/linux-usb-permissions" icon="shield">
+    Set up udev rules to allow Firefox to access USB devices on Linux.
+  </Card>
+  <Card title="WinUSB on Windows" href="/guides/windows-winusb" icon="windows">
+    Configure the WinUSB driver so awawausb can communicate with your device.
+  </Card>
+</CardGroup>

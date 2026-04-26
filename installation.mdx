@@ -1,0 +1,90 @@
+---
+title: "Install awawausb on macOS, Linux, or Windows"
+description: "Step-by-step instructions to install the awawausb Firefox extension and native stub binary using prebuilt binaries or from source."
+---
+
+To use awawausb you need two things: the browser extension installed in Firefox, and a small helper program called the **native stub** installed on your computer. The extension and the native stub communicate over Firefox's native messaging protocol, so both must be present for WebUSB to work.
+
+## Install the extension
+
+<Tabs>
+  <Tab title="Signed release">
+    Download the `.xpi` file from the [GitHub Releases page](https://github.com/ArcaneNibble/awawausb/releases) and open it in Firefox. Firefox will prompt you to add the extension.
+  </Tab>
+  <Tab title="Testing version (Developer Edition)">
+    You can load an unsigned build directly from source without signing it.
+
+    <Steps>
+      <Step title="Open the debugging page">
+        Navigate to `about:debugging` in Firefox.
+      </Step>
+      <Step title="Select This Firefox">
+        Click **This Firefox** in the left-hand sidebar.
+      </Step>
+      <Step title="Load the add-on">
+        Click **Load Temporary Add-on…** and browse to `manifest.json` inside the `extension/` directory of the repository.
+      </Step>
+    </Steps>
+
+    <Note>Temporary add-ons are removed when Firefox is closed. You will need to reload the add-on each session.</Note>
+  </Tab>
+</Tabs>
+
+## Install the native stub
+
+<Tabs>
+  <Tab title="Prebuilt binaries">
+    Prebuilt binaries are available for the following platforms:
+
+    - macOS x86_64 and ARM64
+    - Linux x86_64 and aarch64
+    - Windows AMD64 and ARM64
+
+    <Steps>
+      <Step title="Download the extension and native stub">
+        Go to the [GitHub Releases page](https://github.com/ArcaneNibble/awawausb/releases) and download the `.xpi` file and the native stub `.zip` for your platform.
+      </Step>
+      <Step title="Unzip all files">
+        Extract all files from the native stub zip into the same directory. The installer scripts expect the binary and manifest files to be present alongside them.
+
+        <Warning>You must unzip **all** files, not just the installer script. If the binary is missing, the installer will exit with an error.</Warning>
+      </Step>
+      <Step title="Run the installer">
+        Open a terminal (or Command Prompt on Windows) in the extracted directory and run the installer for your platform.
+
+        <Tabs>
+          <Tab title="Linux / macOS">
+            ```bash
+            ./install.sh
+            ```
+
+            The script detects your OS and CPU architecture automatically. It will ask where to install the binary (defaulting to `~/.local/bin`) and then write the native manifest to the correct location for Firefox to discover it.
+          </Tab>
+          <Tab title="Windows">
+            Double-click `install.bat` or run it from a Command Prompt:
+
+            ```bat
+            install.bat
+            ```
+
+            The script copies the binary to `%APPDATA%\awawausb-native-stub\` and creates the required registry key under `HKCU\SOFTWARE\Mozilla\NativeMessagingHosts\awawausb_native_stub`.
+          </Tab>
+        </Tabs>
+      </Step>
+    </Steps>
+
+    <Note>
+      **Unusual configurations:** The default installer is known to have problems with:
+
+      - Shared \*nix home directories used across computers with different CPU architectures
+      - Windows roaming user profiles spanning computers with different CPU architectures
+
+      The native manifest format uses absolute paths and was not designed with these setups in mind. If you are in one of these situations, you will need to create a manual workaround. See [developer/native-manifest](/developer/native-manifest) for the manifest format details.
+    </Note>
+  </Tab>
+  <Tab title="From source">
+    If you prefer to build the native stub yourself, see [Building from source](/developer/building-from-source) for full build instructions.
+
+    Once you have compiled the binary, you need to register it with Firefox by creating a native manifest file. See [Native manifest setup](/developer/native-manifest) for the file format, required fields, and the correct install locations for each operating system.
+  </Tab>
+</Tabs>

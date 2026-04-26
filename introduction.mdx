@@ -1,0 +1,49 @@
+---
+title: "awawausb: WebUSB for Firefox"
+description: "awawausb brings the WebUSB API to Firefox via native messaging, letting web pages communicate with USB devices on macOS, Linux, and Windows."
+---
+
+awawausb adds full WebUSB support to Firefox. Firefox does not natively implement the WebUSB API, but this extension bridges that gap by pairing a browser extension with a small native binary (the "native stub") that runs alongside the browser and communicates with USB devices using operating-system APIs.
+
+The extension exposes a Chrome-compatible `navigator.usb` API surface to every web page, so any site built for WebUSB in Chrome will work in Firefox without modification.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the extension and native stub on macOS, Linux, or Windows in minutes.
+  </Card>
+  <Card title="System requirements" icon="server" href="/system-requirements">
+    Check OS versions, kernel requirements, and driver prerequisites before installing.
+  </Card>
+  <Card title="What is WebUSB?" icon="usb" href="/guides/what-is-webusb">
+    Understand the WebUSB API and how it compares to WebHID, Web Serial, and other device APIs.
+  </Card>
+  <Card title="Developer guide" icon="code" href="/developer/building-from-source">
+    Build from source, set up a native manifest, and debug the extension internals.
+  </Card>
+</CardGroup>
+
+## How it works
+
+awawausb has two parts that must both be installed and running for WebUSB to work:
+
+1. **The browser extension** — injects the `navigator.usb` API into every web page you visit. It runs a persistent background script that manages device state, user permissions, and message routing.
+
+2. **The native stub** — a small Rust binary that runs outside the browser and communicates with physical USB devices using OS-level APIs. The extension launches it automatically via Firefox's [native messaging](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging) mechanism and exchanges JSON messages with it over stdin/stdout.
+
+<Note>
+Both the extension **and** the native stub must be installed. The extension alone cannot access USB hardware.
+</Note>
+
+## Supported platforms
+
+| Platform | Architectures |
+|---|---|
+| macOS 10.15+ | x86_64, ARM64 (Universal binary) |
+| Linux (kernel 4.8+) | x86_64, aarch64 |
+| Windows 10+ | AMD64, ARM64 |
+
+## API compatibility
+
+awawausb targets full compatibility with Chrome's WebUSB implementation. The `navigator.usb` object, `USBDevice` class, and all transfer methods behave the same as in Chromium.
+
+One known difference: unlike Chrome, this API is only available on the **main page** and is **not** available inside [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers).
